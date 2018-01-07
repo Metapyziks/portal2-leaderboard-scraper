@@ -230,8 +230,6 @@ namespace LeaderboardScraper
 
     class Program
     {
-        static readonly DateTime _sStartTime = DateTime.Now;
-
         static int ReadIndex(int min, int max)
         {
             int index;
@@ -327,8 +325,8 @@ selected:
             Console.WriteLine();
 
             var asmDir = Path.GetDirectoryName(typeof(Program).GetTypeInfo().Assembly.Location);
-            var leaderboardDir = Path.Combine(asmDir, "leaderboards", $"{leaderboard.Name}.json");
-            var destFilePath = Path.Combine(leaderboardDir, $"{_sStartTime:yyyy-dd-M}.json");
+            var leaderboardDir = Path.Combine(asmDir, "leaderboards");
+            var destFilePath = Path.Combine(leaderboardDir, $"{leaderboard.Name}.json");
 
             if (!Directory.Exists(leaderboardDir)) Directory.CreateDirectory(leaderboardDir);
 
