@@ -220,7 +220,7 @@ namespace LeaderboardScraper
             Name = leaderboard.Name;
             IntervalSize = leaderboard.DisplayType == SteamStats.DisplayType.Score ? 1 : 50;
             MinScore = 0;
-            MaxScore = leaderboard.DisplayType == SteamStats.DisplayType.Score ? 100 : 5 * 60 * 100;
+            MaxScore = leaderboard.DisplayType == SteamStats.DisplayType.Score ? 100 : 10 * 60 * 100;
             NextRequestUrl = leaderboard.Url;
             RequestedLeaderboardEntries = 0;
             TotalLeaderboardEntries = leaderboard.Entries;
@@ -250,85 +250,143 @@ namespace LeaderboardScraper
                 var leaderboards = stats.GetLeaderboards(game);
                 Console.WriteLine($"Found {leaderboards.Count} leaderboards.");
 
-                var path = new List<string>();
-
-                SteamStats.LeaderboardInfo leaderboard;
-
-browsing:
+                if (args.Contains("--fuck-my-shit-up"))
                 {
-                    Console.WriteLine();
-                    Console.WriteLine($"Browsing /{string.Join("/", path)}:");
-
-                    var entries = leaderboards
-                        .Where(x => x.IsInPath(path) && x.NameParts.Length > path.Count)
-                        .GroupBy(x => x.NameParts[path.Count])
-                        .OrderBy(x => x.Count() == 1 ? 1 : 0)
-                        .ToArray();
-
-                    if (path.Count > 0)
-                    {
-                        Console.WriteLine($"  {0}:\t../");
-                    }
-
-                    var i = 1;
-                    foreach (var entry in entries)
-                    {
-                        Console.WriteLine($"  {i++}:\t{(entry.Count() == 1 ? entry.First().DisplayName : entry.Key + "/")}");
-                    }
-
-                    i = ReadIndex(path.Count > 0 ? 0 : 1, entries.Length);
-
-                    if (i == 0) path.RemoveAt(path.Count - 1);
-                    else if(entries[i - 1].Count() == 1)
-                    {
-                        leaderboard = entries[i - 1].First();
-                        goto selected;
-                    }
-                    else path.Add(entries[i - 1].Key);
-
-                    goto browsing;
+                    DownloadEveryLeaderboard(stats, leaderboards);
                 }
-
-selected:
+                else
                 {
-                    Console.WriteLine();
-                    Console.WriteLine($"Selected {leaderboard.DisplayName} ({leaderboard.Entries:N} entries).");
-                    Console.WriteLine($"  {0}:\tBack to browse");
-                    Console.WriteLine($"  {1}:\tGenerate histogram data");
-
-                    switch (ReadIndex(0, 1))
-                    {
-                        case 0:
-                            goto browsing;
-                        case 1:
-                            var cancellationSource = new CancellationTokenSource();
-                            var task = GenerateHistogram(stats, leaderboard, cancellationSource.Token);
-
-                            Console.ReadKey(false);
-
-                            if (!task.IsCompleted)
-                            {
-                                cancellationSource.Cancel();
-                            }
-
-                            goto selected;
-                    }
+                    InteractiveMenu(stats, leaderboards);
                 }
             }
         }
 
-        static async Task GenerateHistogram(SteamStats stats, SteamStats.LeaderboardInfo leaderboard, CancellationToken cancel)
+        static void DownloadEveryLeaderboard(SteamStats stats, SteamStats.LeaderboardsResponse leaderboards)
         {
             Console.WriteLine();
-            Console.WriteLine($"Generating histogram for {leaderboard.DisplayName}.");
+            Console.WriteLine($"Generating histogram for every leaderboard.");
             Console.WriteLine("Press any key to cancel...");
-            Console.WriteLine();
 
+            var cancellationSource = new CancellationTokenSource();
+
+            var task = DownloadLeaderboardsAsync(stats, leaderboards, cancellationSource.Token);
+            
+            task.ContinueWith((t, state) =>
+            {
+                Console.WriteLine();
+                Console.WriteLine("Press any key to continue...");
+            }, null, cancellationSource.Token);
+
+            Console.ReadKey(false);
+
+            if (!task.IsCompleted)
+            {
+                cancellationSource.Cancel();
+            }
+        }
+
+        static async Task DownloadLeaderboardsAsync(SteamStats stats, IEnumerable<SteamStats.LeaderboardInfo> leaderboards, CancellationToken cancel)
+        {
+            foreach (var leaderboard in leaderboards)
+            {
+                Console.WriteLine();
+                Console.WriteLine($"Processing {leaderboard.DisplayName}...");
+                await GenerateHistogramAsync(stats, leaderboard, cancel);
+            }
+        }
+
+        static void InteractiveMenu(SteamStats stats, SteamStats.LeaderboardsResponse leaderboards)
+        {
+            var path = new List<string>();
+
+            SteamStats.LeaderboardInfo leaderboard;
+
+            browsing:
+            {
+                Console.WriteLine();
+                Console.WriteLine($"Browsing /{string.Join("/", path)}:");
+
+                var entries = leaderboards
+                    .Where(x => x.IsInPath(path) && x.NameParts.Length > path.Count)
+                    .GroupBy(x => x.NameParts[path.Count])
+                    .OrderBy(x => x.Count() == 1 ? 1 : 0)
+                    .ToArray();
+
+                if (path.Count > 0)
+                {
+                    Console.WriteLine($"  {0}:\t../");
+                }
+
+                var i = 1;
+                foreach (var entry in entries)
+                {
+                    Console.WriteLine($"  {i++}:\t{(entry.Count() == 1 ? entry.First().DisplayName : entry.Key + "/")}");
+                }
+
+                i = ReadIndex(path.Count > 0 ? 0 : 1, entries.Length);
+
+                if (i == 0) path.RemoveAt(path.Count - 1);
+                else if(entries[i - 1].Count() == 1)
+                {
+                    leaderboard = entries[i - 1].First();
+                    goto selected;
+                }
+                else path.Add(entries[i - 1].Key);
+
+                goto browsing;
+            }
+
+            selected:
+            {
+                Console.WriteLine();
+                Console.WriteLine($"Selected {leaderboard.DisplayName} ({leaderboard.Entries:N} entries).");
+                Console.WriteLine($"  {0}:\tBack to browse");
+                Console.WriteLine($"  {1}:\tGenerate histogram data");
+
+                switch (ReadIndex(0, 1))
+                {
+                    case 0:
+                        goto browsing;
+                    case 1:
+                        Console.WriteLine();
+                        Console.WriteLine($"Generating histogram for {leaderboard.DisplayName}.");
+                        Console.WriteLine("Press any key to cancel...");
+                        Console.WriteLine();
+
+                        var cancellationSource = new CancellationTokenSource();
+                        var task = GenerateHistogramAsync(stats, leaderboard, cancellationSource.Token);
+
+                        task.ContinueWith((t, state) =>
+                        {
+                            Console.WriteLine();
+                            Console.WriteLine("Press any key to continue...");
+                        }, null, cancellationSource.Token);
+
+                        Console.ReadKey(false);
+
+                        if (!task.IsCompleted)
+                        {
+                            cancellationSource.Cancel();
+                        }
+
+                        goto selected;
+                }
+            }
+        }
+
+        static string GetLeaderboardOutputPath(SteamStats.LeaderboardInfo leaderboard)
+        {
             var asmDir = Path.GetDirectoryName(typeof(Program).GetTypeInfo().Assembly.Location);
             var leaderboardDir = Path.Combine(asmDir, "leaderboards");
-            var destFilePath = Path.Combine(leaderboardDir, $"{leaderboard.Name}.json");
+            return Path.Combine(leaderboardDir, $"{leaderboard.Name}.json");
+        }
 
-            if (!Directory.Exists(leaderboardDir)) Directory.CreateDirectory(leaderboardDir);
+        static async Task GenerateHistogramAsync(SteamStats stats, SteamStats.LeaderboardInfo leaderboard, CancellationToken cancel)
+        {
+            var destFilePath = GetLeaderboardOutputPath(leaderboard);
+            var destFileDir = Path.GetDirectoryName(destFilePath);
+
+            if (!Directory.Exists(destFileDir)) Directory.CreateDirectory(destFileDir);
 
             var data = File.Exists(destFilePath)
                 ? JsonConvert.DeserializeObject<HistogramData>(File.ReadAllText(destFilePath))
@@ -348,14 +406,16 @@ selected:
                     break;
                 }
 
-                Console.WriteLine($"Fetched {entries.EntryEnd} of {entries.TotalLeaderboardEntries} entries...");
+                if (cancel.IsCancellationRequested) return;
+
+                Console.WriteLine($"- Fetched {entries.EntryEnd} of {entries.TotalLeaderboardEntries} entries...");
 
                 foreach (var entry in entries.Entries)
                 {
                     if (entry.Score < data.MinScore) continue;
                     if (entry.Score >= data.MaxScore)
                     {
-                        Console.WriteLine("Reached max score.");
+                        Console.WriteLine("- Reached max score.");
                         data.RequestedLeaderboardEntries = data.TotalLeaderboardEntries;
                         break;
                     }
@@ -368,14 +428,12 @@ selected:
                 if (entries.EntryEnd > data.RequestedLeaderboardEntries)
                 {
                     data.RequestedLeaderboardEntries = entries.EntryEnd;
+                    data.TotalLeaderboardEntries = entries.TotalLeaderboardEntries;
                     data.NextRequestUrl = entries.NextRequestUrl;
                 }
 
                 File.WriteAllText(destFilePath, JsonConvert.SerializeObject(data));
             }
-            
-            Console.WriteLine();
-            Console.WriteLine("Press any key to continue...");
         }
     }
 }
