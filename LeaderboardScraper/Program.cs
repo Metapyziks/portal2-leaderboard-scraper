@@ -250,6 +250,14 @@ namespace LeaderboardScraper
                 var leaderboards = stats.GetLeaderboards(game);
                 Console.WriteLine($"Found {leaderboards.Count} leaderboards.");
 
+                foreach (var arg in args)
+                {
+                    if (arg.EndsWith(".json") && File.Exists(arg))
+                    {
+                        FixupStageList(leaderboards, arg);
+                    }
+                }
+
                 if (args.Contains("--fuck-my-shit-up"))
                 {
                     DownloadEveryLeaderboard(stats, leaderboards);
@@ -259,6 +267,58 @@ namespace LeaderboardScraper
                     InteractiveMenu(stats, leaderboards);
                 }
             }
+        }
+
+        class StageInfo
+        {
+            [JsonProperty("title")]
+            public string Title { get; set; }
+            
+            [JsonProperty("levels")]
+            public LevelInfo[] Levels { get; set; }
+        }
+
+        public class LevelInfo
+        {
+            [JsonProperty("map")]
+            public string Map { get; set; }
+            
+            [JsonProperty("name")]
+            public string Name { get; set; }
+            
+            [JsonProperty("portalsId")]
+            public int PortalsId { get; set; }
+            
+            [JsonProperty("timeId")]
+            public int TimeId { get; set; }
+        }
+
+        class StageListFile
+        {
+            [JsonProperty("stages")]
+            public StageInfo[] Stages { get; set; }
+        }
+
+        static int GetLeaderboardId(SteamStats.LeaderboardsResponse leaderboards, string name)
+        {
+            var match = leaderboards.FirstOrDefault(x => x.Name == name);
+            return match?.LeaderboardId ?? 0;
+        }
+
+        static void FixupStageList(SteamStats.LeaderboardsResponse leaderboards, string path)
+        {
+            var file = JsonConvert.DeserializeObject<StageListFile>(File.ReadAllText(path));
+
+            foreach (var stage in file.Stages)
+            {
+                foreach (var level in stage.Levels)
+                {
+                    level.PortalsId = GetLeaderboardId(leaderboards, "challenge_portals_" + level.Map);
+                    level.TimeId = GetLeaderboardId(leaderboards, "challenge_besttime_" + level.Map);
+                }
+            }
+
+            File.WriteAllText(path, JsonConvert.SerializeObject(file, Formatting.Indented));
         }
 
         static void DownloadEveryLeaderboard(SteamStats stats, SteamStats.LeaderboardsResponse leaderboards)
